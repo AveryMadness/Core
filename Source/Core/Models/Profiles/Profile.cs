@@ -265,7 +265,12 @@ public class Profile : BaseProfileDisplay
     {
         if (ArchiveDirectory.Length != 0)
         {
-            Provider = new BaseProvider(ArchiveDirectory, new VersionContainer(Version, TexturePlatform));
+            Provider = new BaseProvider(ArchiveDirectory, new VersionContainer(Version, TexturePlatform, optionOverrides: VersionOptions));
+
+            foreach (var (option, value) in VersionOptions)
+            {
+                Log.Information($"[{Name}] version option {option} = {value}");
+            }
         }
         
         var onDemandPlugin = Plugins.OfType<IOnDemandPlugin>().FirstOrDefault();

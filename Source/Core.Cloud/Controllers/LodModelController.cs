@@ -46,9 +46,31 @@ public partial class CloudApiController
         var profile = FindBaseProfileForPath(path, found: out var found);
         if (!found) return NotFoundResponse;
 
-        if (LoadExportOfType<USkeletalMesh>(profile.Provider, path) is not { LODModels: { } lodModels } skeletalMesh)
+        USkeletalMesh? skeletalMesh;
+
+        try
         {
-            return NotFoundResponse;
+            skeletalMesh = LoadExportOfType<USkeletalMesh>(profile.Provider, path);
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "[Core.Cloud]: skeletal mesh {Path} could not be read on {Profile} ({Game})", path, profile.Name, profile.Provider.Versions.Game);
+
+            return MeshReadFailed("lodmodel", path, profile, exception);
+        }
+
+        if (skeletalMesh is null)
+        {
+            Log.Warning("[Core.Cloud]: skeletal mesh {Path}: the package holds no SkeletalMesh export", path);
+
+            return MeshNotFound("lodmodel", path, profile, "The package holds no SkeletalMesh export");
+        }
+
+        if (skeletalMesh.LODModels is not { } lodModels)
+        {
+            Log.Warning("[Core.Cloud]: skeletal mesh {Path}: \"{Name}\" has no LOD models; the package is uncooked or the reader stopped before the geometry", path, skeletalMesh.Name);
+
+            return MeshNotFound("lodmodel", path, profile, "The mesh carries no LOD models, so the package is uncooked or the reader stopped before the geometry");
         }
 
         var boneInfo = skeletalMesh.ReferenceSkeleton?.FinalRefBoneInfo ?? [];
@@ -62,10 +84,20 @@ public partial class CloudApiController
             }
         }
 
+        if (lods.Count == 0)
+        {
+            Log.Warning("[Core.Cloud]: skeletal mesh {Path}: \"{Name}\" has {Count} cooked LOD(s) and none of them read; ask /api/diagnose/mesh for why", path, skeletalMesh.Name, lodModels.Length);
+        }
+        else
+        {
+            Log.Information("[Core.Cloud]: skeletal mesh {Path}: served {Served} of {Count} LOD(s), {Bones} bone(s)", path, lods.Count, lodModels.Length, boneInfo.Length);
+        }
+
         return new JsonResult(new
         {
             bones = boneInfo.Select(Bone => Bone.Name.Text).ToArray(),
-            lods
+            lods,
+            cookedLods = lodModels.Length
         });
     }
 

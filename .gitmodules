@@ -1,3 +1,4 @@
 [submodule "Dependencies/CUE4Parse"]
 	path = Dependencies/CUE4Parse
-	url = https://github.com/FabianFG/CUE4Parse
+	url = https://github.com/AveryMadness/CUE4Parse.git
+	branch = fortnite-recreation

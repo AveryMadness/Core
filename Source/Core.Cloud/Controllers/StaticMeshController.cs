@@ -10,6 +10,8 @@ using CUE4Parse_Conversion.Options;
 
 using Microsoft.AspNetCore.Mvc;
 
+using Serilog;
+
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /* Core Cloud Controller: Static Mesh                                                                                               */
 /*                                                                                                                                  */
@@ -73,11 +75,36 @@ public partial class CloudApiController
          * A package holding one mesh needs nothing said: it is the only one there. An HLOD proxy
          * keeps a mesh per thing it stands in for, four of them under the one name, and answering
          * with whichever comes first hands the same geometry back four times. */
-        var staticMesh = FindStaticMesh(profile.Provider, path, export_name);
+        UStaticMesh? staticMesh;
 
-        if (staticMesh is not { RenderData: { } renderData })
+        try
         {
-            return NotFoundResponse;
+            staticMesh = FindStaticMesh(profile.Provider, path, export_name);
+        }
+        catch (Exception exception)
+        {
+            /* The reader threw partway through the package, which on a build the profile's version
+             * does not describe is the usual way a mesh fails: said as such, with the build, rather
+             * than as a missing file */
+            Log.Error(exception, "[Core.Cloud]: static mesh {Path} could not be read on {Profile} ({Game})", path, profile.Name, profile.Provider.Versions.Game);
+
+            return MeshReadFailed("staticmesh", path, profile, exception);
+        }
+
+        if (staticMesh is null)
+        {
+            Log.Warning("[Core.Cloud]: static mesh {Path}: the package holds no StaticMesh export (asked for \"{Export}\")", path, export_name ?? "");
+
+            return MeshNotFound("staticmesh", path, profile, "The package holds no StaticMesh export");
+        }
+
+        if (staticMesh.RenderData is not { } renderData)
+        {
+            Log.Warning("[Core.Cloud]: static mesh {Path}: \"{Name}\" has no render data (cooked: {Cooked}); the package is uncooked or the reader stopped before the geometry", path, staticMesh.Name, staticMesh.bCooked);
+
+            return MeshNotFound("staticmesh", path, profile, staticMesh.bCooked
+                ? "The mesh is cooked and carries no render data, so the reader stopped before the geometry"
+                : "The mesh is not cooked, so there is no render data to serve");
         }
 
         var slots = new List<StaticSlot>();
@@ -124,12 +151,59 @@ public partial class CloudApiController
             }
         }
 
+        if (lods.Count == 0)
+        {
+            Log.Warning("[Core.Cloud]: static mesh {Path}: \"{Name}\" has {Count} cooked LOD(s) and none of them read; ask /api/diagnose/mesh for why", path, staticMesh.Name, renderData.LODs?.Length ?? 0);
+        }
+        else
+        {
+            Log.Information("[Core.Cloud]: static mesh {Path}: served {Served} of {Count} LOD(s), {Slots} slot(s)", path, lods.Count, renderData.LODs?.Length ?? 0, slots.Count);
+        }
+
         return new JsonResult(new
         {
             name = staticMesh.Name,
             slots,
-            lods
+            lods,
+            cookedLods = renderData.LODs?.Length ?? 0
         });
+    }
+
+    /* Both mesh endpoints answer a failure the same way, and with enough for the far end to say
+     * which build and which profile it was looking at */
+    private static JsonResult MeshNotFound(string endpoint, string path, BaseProfile profile, string reason)
+    {
+        return new JsonResult(new
+        {
+            errorCode = $"cloud.{endpoint}.no_geometry",
+            errorMessage = reason,
+            numericErrorCode = 1010,
+            path,
+            profile = profile.Name,
+            game = profile.Provider.Versions.Game.ToString(),
+            diagnose = $"/api/diagnose/mesh?path={Uri.EscapeDataString(path)}"
+        })
+        {
+            StatusCode = StatusCodes.Status404NotFound
+        };
+    }
+
+    private static JsonResult MeshReadFailed(string endpoint, string path, BaseProfile profile, Exception exception)
+    {
+        return new JsonResult(new
+        {
+            errorCode = $"cloud.{endpoint}.read_failed",
+            errorMessage = $"{exception.GetType().Name}: {exception.Message}",
+            numericErrorCode = 1011,
+            exception = exception.ToString(),
+            path,
+            profile = profile.Name,
+            game = profile.Provider.Versions.Game.ToString(),
+            diagnose = $"/api/diagnose/mesh?path={Uri.EscapeDataString(path)}"
+        })
+        {
+            StatusCode = StatusCodes.Status500InternalServerError
+        };
     }
 
     private static StaticLod? BuildStaticLod(FStaticMeshLODResources lodResources, int lodIndex, float screenSize)
@@ -232,10 +306,12 @@ public partial class CloudApiController
 
             read = whole.LODs.FirstOrDefault(one => one.IsNanite);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             /* A stream this build cannot read is not worth taking the mesh down over: the fallback
              * is still there, and comes back as it did before */
+            Log.Warning(exception, "[Core.Cloud]: the Nanite stream of \"{Name}\" could not be read, serving the fallback LODs", staticMesh.Name);
+
             return null;
         }
 

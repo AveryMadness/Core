@@ -43,6 +43,15 @@ public partial class BaseProfile : ObservableValidator
     /* Which mappings file the provider ended up on */
     public string? LoadedMappingsFile { get; set; }
 
+    /* Serialization switches the build needs that its engine version alone does not say.
+     *
+     * A title cooked off a main-branch engine between two releases carries some of the next
+     * release's formats under the previous release's version number: Fortnite 23.x is 5.1 with
+     * 5.2's Lumen card data. The reader keys those formats off named options with per-version
+     * defaults, and these override the defaults for this profile. Names are the reader's own
+     * (see CUE4Parse's VersionContainer.InitOptions). */
+    public Dictionary<string, bool> VersionOptions { get; set; } = new();
+
     /* The LATEST Schema Version */
     private static readonly int LatestSchemaVersion = 1;
     

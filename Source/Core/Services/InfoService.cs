@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading.Tasks;
@@ -46,6 +46,7 @@ public partial class InfoService : ObservableObject, ILogEventSink, IService
 
         loggerConfiguration.WriteTo.Console(theme: AnsiConsoleTheme.Literate)
             .WriteTo.Sink(this)
+            .WriteTo.Sink(Core.Cloud.Objects.LogCapture.Instance)
             .WriteTo.File(LogFilePath);
         
         Log.Logger = loggerConfiguration.CreateLogger();
