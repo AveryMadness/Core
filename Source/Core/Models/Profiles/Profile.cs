@@ -355,9 +355,12 @@ public class Profile : BaseProfileDisplay
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var MappingFile = MappingsContainer.Path;
+        /* An override is the reader's own pick, so it stands. Anything else is a leftover from
+         * whatever this profile was pointed at last, and the one just resolved for this build is
+         * what should answer for it. */
+        var MappingFile = MappingsContainer.Override ? MappingsContainer.Path : null;
 
-        if (!MappingsContainer.Override && string.IsNullOrEmpty(MappingFile) || !File.Exists(MappingFile))
+        if (string.IsNullOrEmpty(MappingFile) || !File.Exists(MappingFile))
         {
             MappingFile = mapping is { LocalPath: not null } ? mapping.LocalPath : GetLocallyRecentCreatedMappings();
         }
