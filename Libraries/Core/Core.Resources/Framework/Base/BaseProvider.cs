@@ -4,6 +4,7 @@ using System.IO;
 using CUE4Parse.FileProvider.Vfs;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
+using CUE4Parse.Utils;
 
 namespace Core.Resources.Framework.Base;
 
@@ -27,6 +28,28 @@ public class BaseProvider : AbstractVfsFileProvider
         if (!WorkingDirectory.Exists) throw new DirectoryNotFoundException($"Profile installation folder doesn't exist: {WorkingDirectory.FullName}");
         
         RegisterFiles(WorkingDirectory);
+    }
+
+    public string NormalizePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+
+        var candidate = path.Replace('\\', '/').TrimStart('/');
+        var root = candidate.SubstringBefore('/');
+
+        if (root.Length == 0 || !root.Equals(ProjectName, StringComparison.OrdinalIgnoreCase)) return path;
+
+        var tree = candidate.SubstringAfter('/');
+        if (tree.Length == 0) return path;
+
+        /* The three the mount actually carries, and the ones FixPath itself treats as already placed */
+        var next = tree.SubstringBefore('/');
+
+        if (next.Equals("Content", StringComparison.OrdinalIgnoreCase) ||
+            next.Equals("Config", StringComparison.OrdinalIgnoreCase) ||
+            next.Equals("Plugins", StringComparison.OrdinalIgnoreCase)) return path;
+
+        return string.Concat(root, "/Content/", tree);
     }
 
     private void RegisterFiles(DirectoryInfo directory)

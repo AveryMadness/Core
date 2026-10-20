@@ -268,6 +268,9 @@ public partial class CloudApiController : ControllerBase
         
         var contentType = Request.Headers.ContentType;
         path = path.SubstringBefore('.');
+
+        /* A path naming the project but not its Content folder still names one file, so it resolves */
+        path = MainProfile!.Provider.NormalizePath(path);
         
         /* Find the profile that'll have this asset */
         var profile = FindBaseProfileForPath(path, found: out var found);
