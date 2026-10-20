@@ -378,13 +378,14 @@ public class Profile : BaseProfileDisplay
             /* Read rather than trusted. A file too new for this build to parse is one the archive
              * may still be readable without, so it is reported and left behind rather than taking
              * the whole profile down with it. */
+            var mappingsComparer = StringComparer.Ordinal;
             try
             {
-                Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(MappingFile);
+                Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(MappingFile, mappingsComparer);
 
                 CookedMappings = Provider.MappingsContainer;
 
-                var editorMappings = new FileUsmapTypeMappingsProvider(MappingFile);
+                var editorMappings = new FileUsmapTypeMappingsProvider(MappingFile, mappingsComparer);
 
                 EngineSchema.Apply(editorMappings.MappingsForGame, MappingFile, Version);
 
