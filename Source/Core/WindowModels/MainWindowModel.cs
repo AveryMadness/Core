@@ -15,6 +15,7 @@ using CommunityToolkit.Mvvm.Input;
 using FluentAvalonia.UI.Controls;
 using FluentIcons.Common;
 using Microsoft.WindowsAPICodePack.Taskbar;
+using Serilog;
 using Core.Cloud.Controllers;
 using Core.Controls.Profiles;
 using Core.Framework.Models;
@@ -365,10 +366,21 @@ public partial class MainWindowModel : WindowModelBase
             return;
         }
         
+        /* Cancelled before it is disposed, or a callback still running lands in whatever task is
+         * in flight as an ObjectDisposedException nobody is watching */
         var oldTokenSource = LastProfileCancellationTokenSource;
-        LastProfileCancellationTokenSource = new CancellationTokenSource();
-        _ = oldTokenSource?.CancelAsync()!;
-        oldTokenSource?.Dispose();
+        var tokenSource = new CancellationTokenSource();
+
+        LastProfileCancellationTokenSource = tokenSource;
+
+        if (oldTokenSource is not null)
+        {
+            await oldTokenSource.CancelAsync();
+            oldTokenSource.Dispose();
+        }
+
+        /* Held as a local, since the field is the next load's by the time the delay below is over */
+        var cancellationToken = tokenSource.Token;
         
         SetCurrentProfile(profile);
         RefreshProfileProperties();
@@ -395,8 +407,24 @@ public partial class MainWindowModel : WindowModelBase
 
         _ = Task.Run(async () =>
         {
-            await Task.Delay(100);
-            await CurrentProfile.Initialize(LastProfileCancellationTokenSource!.Token);
+            try
+            {
+                await Task.Delay(100, cancellationToken);
+                await CurrentProfile.Initialize(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                /* A newer load took over, which is the one that reports now */
+            }
+            catch (Exception exception)
+            {
+                /* Thrown away with the task before this, so a profile that failed to start sat on
+                 * "Loading Files" with nothing said anywhere */
+                Log.Error(exception, $"Initializing profile {profile.Name} failed");
+
+                CurrentProfile?.Status.OnFailure(exception.Message);
+                OnProfileInitializationFailure(profile);
+            }
         });
     }
 

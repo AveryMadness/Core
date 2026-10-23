@@ -335,6 +335,17 @@ public class Profile : BaseProfileDisplay
      * before its mappings landed, with any exception in here taking the process down */
     private async Task LoadMappings(CancellationToken cancellationToken = default)
     {
+        /* Nothing before 4.25 can read a usmap: a package from one of those names its properties
+         * outright, so there is no numbering for mappings to stand in for. Asked for anyway, the
+         * most recent one lying about is picked up and a build that never needed it is held up by
+         * reading it, or stopped outright when it is one this build cannot parse. */
+        if (Version < EGame.GAME_UE4_25)
+        {
+            Log.Information($"Skipped mappings for {Name}: {Version} names its properties outright");
+
+            return;
+        }
+
         MappingsResponse? mapping = null;
         try
         {
@@ -349,9 +360,12 @@ public class Profile : BaseProfileDisplay
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var MappingFile = MappingsContainer.Path;
+        /* An override is the reader's own pick, so it stands. Anything else is a leftover from
+         * whatever this profile was pointed at last, and the one just resolved for this build is
+         * what should answer for it. */
+        var MappingFile = MappingsContainer.Override ? MappingsContainer.Path : null;
 
-        if (!MappingsContainer.Override && string.IsNullOrEmpty(MappingFile) || !File.Exists(MappingFile))
+        if (string.IsNullOrEmpty(MappingFile) || !File.Exists(MappingFile))
         {
             MappingFile = mapping is { LocalPath: not null } ? mapping.LocalPath : GetLocallyRecentCreatedMappings();
         }
@@ -369,21 +383,38 @@ public class Profile : BaseProfileDisplay
              *
              * The mappings file is read twice and only the second copy is completed. Which of the
              * two is in front of the provider is decided per package by whoever is reading. */
-            Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(MappingFile);
+            /* Read rather than trusted. A file too new for this build to parse is one the archive
+             * may still be readable without, so it is reported and left behind rather than taking
+             * the whole profile down with it. */
+            var mappingsComparer = StringComparer.Ordinal;
+            try
+            {
+                Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(MappingFile, mappingsComparer);
 
-            CookedMappings = Provider.MappingsContainer;
+                CookedMappings = Provider.MappingsContainer;
 
-            var editorMappings = new FileUsmapTypeMappingsProvider(MappingFile);
+                var editorMappings = new FileUsmapTypeMappingsProvider(MappingFile, mappingsComparer);
 
-            EngineSchema.Apply(editorMappings.MappingsForGame, MappingFile, Version);
+                EngineSchema.Apply(editorMappings.MappingsForGame, MappingFile, Version);
 
-            EditorMappings = editorMappings;
-        
-            LoadedMappingsFile = MappingFile;
+                EditorMappings = editorMappings;
 
-            Log.Information($"Loaded Mappings: {MappingFile}");
+                LoadedMappingsFile = MappingFile;
 
-            WarnIfMappingsAreBehindTheBuild(MappingFile);
+                Log.Information($"Loaded Mappings: {MappingFile}");
+
+                WarnIfMappingsAreBehindTheBuild(MappingFile);
+            }
+            catch (Exception exception)
+            {
+                Provider.MappingsContainer = null;
+
+                CookedMappings = null;
+                EditorMappings = null;
+                LoadedMappingsFile = null;
+
+                Log.Warning($"Couldn't read mappings \"{MappingFile}\": {exception.Message}");
+            }
         }
     }
     

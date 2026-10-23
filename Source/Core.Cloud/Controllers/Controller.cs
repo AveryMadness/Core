@@ -195,6 +195,59 @@ public partial class CloudApiController : ControllerBase
         };
     }
     
+    /* The extensions read back as text rather than as packages */
+    private static readonly string[] RawTextExtensions = [".ini", ".json", ".txt", ".xml", ".csv", ".uproject"];
+
+    private static bool IsRawTextFile(string path)
+    {
+        return RawTextExtensions.Any(extension => path.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /* A file read straight out of whichever profile mounts it, the main one first */
+    public ActionResult GetRawTextFile(string path)
+    {
+        foreach (var profile in new[] { MainProfile! }.Concat(SecondaryBaseProfiles))
+        {
+            if (!profile.Provider.TryGetGameFile(path, out var gameFile) || gameFile == null) continue;
+
+            var data = profile.Provider.SaveAsset(gameFile);
+
+            using var stream = new MemoryStream(data);
+            using var reader = new StreamReader(stream);
+
+            return new ContentResult
+            {
+                Content = reader.ReadToEnd(),
+                ContentType = "text/plain; charset=utf-8",
+                StatusCode = 200
+            };
+        }
+
+        return NotFoundResponse;
+    }
+
+    /* Request to list the files mounted under a path, for finding a config or text file before asking for it */
+    [HttpGet("files")]
+    public ActionResult GetFiles(string prefix, int limit = 500)
+    {
+        if (!IsBaseProfileReady || MainProfile == null) return NotInitializedResponse;
+
+        var files = new[] { MainProfile }.Concat(SecondaryBaseProfiles)
+            .SelectMany(profile => profile.Provider.Files.Keys)
+            .Where(file => file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToList();
+
+        return new JsonResult(new
+        {
+            prefix,
+            count = files.Count,
+            files
+        });
+    }
+
     /* Normal Export */
     [HttpGet("export")]
     public ActionResult GetExport(bool raw, string? path, string? export_name, string? export_type, bool? metadata, bool? save)
@@ -205,9 +258,19 @@ public partial class CloudApiController : ControllerBase
         {
             return GetRawExport(path);
         }
+
+        /* A config or other text file is served as it sits in the container. There is no package to read
+         * it as, so it would otherwise fall through to the package lookup below and come back not found. */
+        if (IsRawTextFile(path) && MainProfile != null)
+        {
+            return GetRawTextFile(path);
+        }
         
         var contentType = Request.Headers.ContentType;
         path = path.SubstringBefore('.');
+
+        /* A path naming the project but not its Content folder still names one file, so it resolves */
+        path = MainProfile!.Provider.NormalizePath(path);
         
         /* Find the profile that'll have this asset */
         var profile = FindBaseProfileForPath(path, found: out var found);
